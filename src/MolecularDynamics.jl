@@ -171,10 +171,11 @@ function lj_force(sigma, epsilon, r, d)
 end
 
 
-function verlet(parts, oldparts, timestep)
+function verlet(parts, oldparts, timestep, box)
     parts::Array{Particle}
     oldparts::Array{Particle}
     timestep::Real
+    box::Box
 
     num = length(parts)
     newparts = deepcopy(parts)
@@ -193,10 +194,17 @@ function verlet(parts, oldparts, timestep)
         forcez = 0.0
         for j in 1:1:num    
             if i != j
+
                 # Compute distance between particles
                 dx = parts[i].position.x - parts[j].position.x
                 dy = parts[i].position.y - parts[j].position.y
                 dz = parts[i].position.z - parts[j].position.z
+
+                # Compute the nearest image
+                dx = dx - box.lenx * round(dx / box.lenx)
+                dy = dy - box.leny * round(dy / box.leny)
+                dz = dz - box.lenz * round(dz / box.lenz)
+                
                 dist = sqrt(dx^2 + dy^2 + dz^2)
 
                 # Use mixing rules
@@ -227,15 +235,30 @@ function verlet(parts, oldparts, timestep)
         
         newparts[i].position.z = 2.0 * parts[i].position.z - oldparts[i].position.z + 
                                 newparts[i].acceleration.z * dt2
- 
-        # Compute the new speeds
+
+        # Compute the new velocities
         newparts[i].velocity.x = (newparts[i].position.x - oldparts[i].position.x) * itdt
         newparts[i].velocity.y = (newparts[i].position.y - oldparts[i].position.y) * itdt
         newparts[i].velocity.z = (newparts[i].position.z - oldparts[i].position.z) * itdt
-
+        
         # Compute total kinetic energy
         kinetic += (newparts[i].velocity.x^2 + newparts[i].velocity.y^2 +
             newparts[i].velocity.z^2) * newparts[i].mass * 0.5
+    end
+
+    # Periodic boundary conditions
+    for i in 1:1:num
+        offsetx = box.lenx * floor(newparts[i].position.x / box.lenx)
+        offsety = box.leny * floor(newparts[i].position.y / box.leny)
+        offsetz = box.lenz * floor(newparts[i].position.z / box.lenz)
+        
+        parts[i].position.x = parts[i].position.x - offsetx 
+        parts[i].position.y = parts[i].position.y - offsety
+        parts[i].position.z = parts[i].position.z - offsetz
+        
+        newparts[i].position.x = newparts[i].position.x - offsetx
+        newparts[i].position.y = newparts[i].position.y - offsety 
+        newparts[i].position.z = newparts[i].position.z - offsetz
     end
     
     println("Potential: $potential, Kinetic: $kinetic, Total: $(potential+kinetic)")
@@ -244,9 +267,11 @@ function verlet(parts, oldparts, timestep)
 end
 
 
-function velocity_verlet(parts, timestep)
+function velocity_verlet(parts, timestep, box, periodic)
     parts::Array{Particle}
     timestep::Real
+    box::Box
+    periodic::Bool
 
     num = length(parts)
     newparts = deepcopy(parts)
@@ -282,8 +307,16 @@ function velocity_verlet(parts, timestep)
                 dx = newparts[i].position.x - newparts[j].position.x
                 dy = newparts[i].position.y - newparts[j].position.y
                 dz = newparts[i].position.z - newparts[j].position.z
-                dist = sqrt(dx^2 + dy^2 + dz^2)
 
+                # Compute the nearest image
+                if periodic == true
+                    dx = dx - box.lenx * round(dx / box.lenx)
+                    dy = dy - box.leny * round(dy / box.leny)
+                    dz = dz - box.lenz * round(dz / box.lenz)
+                end
+                
+                dist = sqrt(dx^2 + dy^2 + dz^2)
+                
                 # Use mixing rules
                 sigma = (newparts[i].sigma + newparts[j].sigma) * 0.5
                 epsilon = sqrt(newparts[i].epsilon * newparts[j].epsilon)
@@ -318,6 +351,23 @@ function velocity_verlet(parts, timestep)
             newparts[i].velocity.z^2) * newparts[i].mass * 0.5
     end
     
+    # Periodic boundary conditions
+    if periodic == true
+        for i in 1:1:num
+            offsetx = box.lenx * floor(newparts[i].position.x / box.lenx)
+            offsety = box.leny * floor(newparts[i].position.y / box.leny)
+            offsetz = box.lenz * floor(newparts[i].position.z / box.lenz)
+        
+            parts[i].position.x = parts[i].position.x - offsetx 
+            parts[i].position.y = parts[i].position.y - offsety
+            parts[i].position.z = parts[i].position.z - offsetz
+        
+            newparts[i].position.x = newparts[i].position.x - offsetx
+            newparts[i].position.y = newparts[i].position.y - offsety 
+            newparts[i].position.z = newparts[i].position.z - offsetz
+        end
+    end
+    
     println("Potential: $potential, Kinetic: $kinetic, Total: $(potential+kinetic)")
 
     return newparts
@@ -326,11 +376,11 @@ end
 
 
 function main()
-	box = Box(10, 10, 10)
+	box = Box(6.0, 6.0, 6.0)
     timestep = 0.01
     start = 0
-    stop = 3 
-    num = 300
+    stop = 4 
+    num = 61
 
 	particles = generate_particles(num, sigma=1.0, epsilon=4.0, mass=1.0, box=box)
     
@@ -340,10 +390,10 @@ function main()
     for _ in start:timestep:stop
         
         # Apply Verlet integration
-        # newparticles, particles = verlet(newparticles, particles, timestep)
+        # newparticles, particles = verlet(newparticles, particles, timestep, box)
         
         # Apply Velocity Verlet integrator
-        newparticles = velocity_verlet(newparticles, timestep)
+        newparticles = velocity_verlet(newparticles, timestep, box, true)
         
         # Print the results in .xyz format
         write(file, "$num \n")
