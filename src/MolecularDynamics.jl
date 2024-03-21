@@ -147,27 +147,43 @@ function generate_particles(num; sigma, epsilon, mass, box)
 end
 
 
-function lj_potential(sigma, epsilon, r)
+function lj_potential(sigma, epsilon, distance, cutoff)
 	sigma::Real
 	epsilon::Real
-	r::Real
-    
-    fraction = (sigma/r)^6
+	distance::Real
+    cutoff::Real    
 
-	return 4 * epsilon * (fraction^2 - fraction)
+    if cutoff != 0.0 && distance >= cutoff
+        return 0.0
+    else
+        fraction = (sigma / distance)^6
+        lj = 4 * epsilon * (fraction^2 - fraction)
+
+        if cutoff == 0.0
+	        return lj
+        elseif distance < cutoff
+            cutfraction = (sigma / cutoff)^6
+            cutlj = 4 * epsilon * (cutfraction^2 - cutfraction)
+            return lj - cutlj
+        end
+    end
 end
 
 
-function lj_force(sigma, epsilon, r, d)
+function lj_force(sigma, epsilon, distance, dimension, cutoff)
 	sigma::Real
 	epsilon::Real
-	r::Real
-    d::Real
+	distance::Real
+    dimension::Real
+    cutoff::Real
     
-    fraction = sigma / r
-    fraction7 = fraction^7
-
-	return 24 * epsilon * d * (2 * fraction7^2 - fraction7 * fraction)
+    if cutoff != 0.0 && distance >= cutoff
+        return 0.0
+    else 
+        fraction = sigma / distance
+        fraction7 = fraction^7   
+	    return 24 * epsilon * dimension * (2 * fraction7^2 - fraction7 * fraction)
+    end
 end
 
 
@@ -267,11 +283,12 @@ function verlet(parts, oldparts, timestep, box)
 end
 
 
-function velocity_verlet(parts, timestep, box, periodic)
+function velocity_verlet(parts, timestep, box, periodic, cutoff)
     parts::Array{Particle}
     timestep::Real
     box::Box
     periodic::Bool
+    cutoff::Real
 
     num = length(parts)
     newparts = deepcopy(parts)
@@ -316,18 +333,18 @@ function velocity_verlet(parts, timestep, box, periodic)
                 end
                 
                 dist = sqrt(dx^2 + dy^2 + dz^2)
-                
+                    
                 # Use mixing rules
                 sigma = (newparts[i].sigma + newparts[j].sigma) * 0.5
                 epsilon = sqrt(newparts[i].epsilon * newparts[j].epsilon)
                 
                 # Compute the forces in each direction
-                forcex += lj_force(sigma, epsilon, dist, dx)
-                forcey += lj_force(sigma, epsilon, dist, dy)
-                forcez += lj_force(sigma, epsilon, dist, dz)
+                forcex += lj_force(sigma, epsilon, dist, dx, cutoff)
+                forcey += lj_force(sigma, epsilon, dist, dy, cutoff)
+                forcez += lj_force(sigma, epsilon, dist, dz, cutoff)
 
                 # Compute total potential energy
-                potential += lj_potential(sigma, epsilon, dist) * 0.5
+                potential += lj_potential(sigma, epsilon, dist, cutoff) * 0.5
             end
         end
         
@@ -381,19 +398,20 @@ function main()
     start = 0
     stop = 4 
     num = 61
+    cutoff = 1.4
 
 	particles = generate_particles(num, sigma=1.0, epsilon=4.0, mass=1.0, box=box)
     
     file = open("results.xyz", "w")
     
     newparticles = deepcopy(particles)
-    for _ in start:timestep:stop
+    @time for _ in start:timestep:stop
         
         # Apply Verlet integration
         # newparticles, particles = verlet(newparticles, particles, timestep, box)
         
         # Apply Velocity Verlet integrator
-        newparticles = velocity_verlet(newparticles, timestep, box, true)
+        newparticles = velocity_verlet(newparticles, timestep, box, true, cutoff)
         
         # Print the results in .xyz format
         write(file, "$num \n")
